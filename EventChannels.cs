@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using Core.Interfaces;
 using UnityEngine;
+using static UnityEngine.GraphicsBuffer;
 
 namespace Core
 {
@@ -40,6 +40,19 @@ namespace Core
         public List<Action<T1, T2, T3, T4>> actions;
         public bool isRunning;
 
+    }
+
+    public static class ActionProviderExtension
+    {
+        public static SimpleActionProvider GetActionProvider(this object obj) 
+        {
+            return new SimpleActionProvider();
+        }
+
+        public static SimpleActionProvider<TArg1> GetActionProvider<TArg1>(this object obj)
+        {
+            return new SimpleActionProvider<TArg1>();
+        }
     }
 
     /// <summary>
@@ -132,6 +145,8 @@ namespace Core
             }
         }
 
+
+
         public void DoAction(string topic)
         {
             if (string.IsNullOrEmpty(topic))
@@ -187,6 +202,162 @@ namespace Core
                 foreach (var action in channels[topic].actions)
                 {
                     action.Invoke();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e.Message);
+            }
+
+            channels[topic].isRunning = false;
+        }
+    }
+
+
+    public class SimpleActionProvider<TArg1>
+    {
+
+        private Dictionary<string, ActionInfo<TArg1>> channels = new();
+
+        private Dictionary<string, ActionInfo<TArg1>> actionsToAdd = new();
+
+        private Dictionary<string, ActionInfo<TArg1>> actionsToRemove = new();
+
+        public void AddAction(string topic, Action<TArg1> callback)
+        {
+
+            if (string.IsNullOrEmpty(topic))
+            {
+                return;
+            }
+
+            if (!channels.ContainsKey(topic))
+            {
+                var info = new ActionInfo<TArg1>
+                {
+                    actions = new List<Action<TArg1>>() { callback },
+                    isRunning = false,
+                };
+                channels.Add(topic, info);
+            }
+            else
+            {
+                if (!channels[topic].isRunning)
+                {
+                    channels[topic].actions.Add(callback);
+                    return;
+                }
+
+                if (!actionsToAdd.ContainsKey(topic))
+                {
+                    var info = new ActionInfo<TArg1>
+                    {
+                        actions = new List<Action<TArg1>>() { callback },
+                        isRunning = false,
+                    };
+
+                    actionsToAdd.Add(topic, info);
+                }
+            }
+        }
+
+        public void RemoveAction(string topic, Action<TArg1> callback)
+        {
+
+            if (string.IsNullOrEmpty(topic))
+            {
+                return;
+            }
+
+            if (!channels.ContainsKey(topic))
+            {
+                Debug.LogWarning("There is not action \" " + topic + "\"");
+                return;
+            }
+
+            if (!channels[topic].isRunning)
+            {
+                channels[topic].actions.Remove(callback);
+
+                if (channels[topic].actions.Count == 0)
+                {
+                    channels.Remove(topic);
+                }
+                return;
+            }
+
+            if (actionsToRemove.ContainsKey(topic))
+            {
+                actionsToRemove[topic].actions.Add(callback);
+            }
+            else
+            {
+                var info = new ActionInfo<TArg1>
+                {
+                    actions = new List<Action<TArg1>>() { callback },
+                    isRunning = false,
+                };
+                actionsToRemove.Add(topic, info);
+            }
+        }
+
+
+
+        public void DoAction(string topic, TArg1 arg1)
+        {
+            if (string.IsNullOrEmpty(topic))
+            {
+                return;
+            }
+
+            foreach (var action in actionsToAdd)
+            {
+                if (!channels.ContainsKey(action.Key))
+                {
+                    channels.Add(action.Key, action.Value);
+                }
+                else
+                {
+                    channels[action.Key].actions.AddRange(action.Value.actions);
+                }
+            }
+
+            actionsToAdd.Clear();
+
+            foreach (var action in actionsToRemove)
+            {
+                if (channels.ContainsKey(action.Key))
+                {
+                    foreach (var item in action.Value.actions)
+                    {
+                        if (channels[action.Key].actions.Contains(item))
+                        {
+                            channels[action.Key].actions.Remove(item);
+                        }
+                    }
+
+                    if (channels[action.Key].actions.Count == 0)
+                    {
+                        channels.Remove(action.Key);
+                    }
+                }
+            }
+
+            actionsToRemove.Clear();
+
+            if (!channels.ContainsKey(topic))
+            {
+                Debug.LogWarning("There is not action \" " + topic + "\"");
+                return;
+            }
+
+            channels[topic].isRunning = true;
+
+            try
+            {
+                foreach (var action in channels[topic].actions)
+                {
+                    action.Invoke(arg1);
                 }
             }
             catch (Exception e)
